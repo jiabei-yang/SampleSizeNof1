@@ -1,0 +1,359 @@
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+
+source("../Functions/gen.R")
+source("../Functions/se.R")
+
+# Pts
+load("../Data/main/mainPts_Pair_Ar1_a005_b02_e4_r04_m4_t1_c1_d1.RData")
+data.fig.pts <- data.frame(rbind(data.fig[[1]], 
+                                 data.fig[[2]],
+                                 data.fig[[3]],
+                                 data.fig[[4]]))
+colnames(data.fig.pts) <- c("K", "L", "J", "I", "intcpt", "slp", "CorrStr")
+
+data.fig.pts <- data.fig.pts %>%
+  filter(!is.na(L))
+# data.fig.pts <- data.fig.pts %>%
+#   mutate(K = as.integer(levels(K))[K],
+#          L = as.integer(levels(L))[L],
+#          J = as.integer(levels(J))[J],
+#          I = as.integer(levels(I))[I],
+#          intcpt = as.character(levels(intcpt))[intcpt],
+#          slp    = as.character(levels(slp))[slp])
+data.fig.pts <- data.fig.pts %>%
+  mutate(K = as.integer(K),
+         L = as.integer(L),
+         J = as.integer(J),
+         I = as.integer(I),
+         intcpt = as.character(intcpt),
+         slp    = as.character(slp))
+
+# calculate IJ for designs that reach power
+data.fig.pts <- data.fig.pts %>%
+  mutate(IJ = I * J)
+# summ.data.pts <- data.fig.pts %>%
+#   group_by(intcpt, slp, IJ) %>%
+#   summarise(n = n())
+# choose IJ = 32 with the most combinations
+
+# Fix the number of participants at 32
+fxd.pts <- 32
+
+# Find the designs that reach power
+satisfy.data.fig.pts <- data.fig.pts %>%
+  filter(IJ == fxd.pts)
+# add in designs for easier coding
+satisfy.data.fig.pts <- rbind(data.frame(K = c(6, 8, 10),
+                                         L = 1, 
+                                         J = c(4, 2, 1),
+                                         I = c(8, 16, 32),
+                                         intcpt = "fixed",
+                                         slp    = "random",
+                                         CorrStr = "AR-1", 
+                                         IJ      = 32),
+                              satisfy.data.fig.pts)
+satisfy.data.fig.pts <- rbind(data.frame(K = c(6, 8, 10),
+                                         L = 1, 
+                                         J = c(4, 2, 1),
+                                         I = c(8, 16, 32),
+                                         intcpt = "random",
+                                         slp    = "random",
+                                         CorrStr = "AR-1", 
+                                         IJ      = 32),
+                              satisfy.data.fig.pts)
+
+satisfy.data.fig.pts <- satisfy.data.fig.pts %>%
+  arrange(intcpt, slp, CorrStr, I, K)
+
+max.KL <- 200
+rho             <- 0.4
+sigma.resid.err <- 2
+sigma.tau   <- 1
+sigma.mu    <- 2
+sigma.mutau <- 1
+
+psbl.seq <- "Pairwise Randomization"
+CorrStr  <- "AR-1"
+
+# naive estimate does not depend on how we estimate the population average treatment effect
+# while shrunken estimates depend on the population average model
+# naive estimate does not depend on IJ, so only need to find the optimized K and L to start
+satisfy.niv <- data.frame(K = c(min(satisfy.data.fig.pts$K), NA),
+                          L = c(NA, min(satisfy.data.fig.pts$L))) 
+satisfy.niv$L[is.na(satisfy.niv$L)] <- min(satisfy.data.fig.pts$L[satisfy.data.fig.pts$K == satisfy.niv$K[is.na(satisfy.niv$L)]])
+satisfy.niv$K[is.na(satisfy.niv$K)] <- min(satisfy.data.fig.pts$K[satisfy.data.fig.pts$L == satisfy.niv$L[is.na(satisfy.niv$K)]])
+
+# find the minimum designs for shrunken estimates
+satisfy.shrk.fxdintcpt <- satisfy.data.fig.pts %>%
+  filter((intcpt == "fixed") & (slp == "random"))
+satisfy.shrk.rdmintcpt <- satisfy.data.fig.pts %>%
+  filter((intcpt == "random") & (slp == "random"))
+
+# satisfy.shrk.fxdintcpt <- satisfy.shrk.fxdintcpt %>%
+#   mutate(intcpt = as.character(intcpt),
+#          slp    = as.character(slp))
+# satisfy.shrk.rdmintcpt <- satisfy.shrk.rdmintcpt %>%
+#   mutate(intcpt = as.character(intcpt),
+#          slp    = as.character(slp))
+
+# Calculate naive se
+data.fig.niv <- NULL
+for (i in 1:nrow(satisfy.niv)) {
+  
+  k <- satisfy.niv$K[i]
+  for (l in satisfy.niv$L[i]:floor(max.KL / k)) {
+    # for (l in 51:52) {
+    tmp.se <- calc_se_niv(K               = k, 
+                          L               = l, 
+                          psbl.seq        = psbl.seq, 
+                          sigma.resid.err = sigma.resid.err,
+                          rho             = rho,
+                          corr.str        = CorrStr)
+    data.fig.niv <- rbind(data.fig.niv,
+                          cbind(k, l, tmp.se))
+    
+  }
+  
+}
+
+###############
+# expect TRUE #
+###############
+(log2(fxd.pts) * 2) < max.KL
+
+for (k in (max(satisfy.niv$K) + 1):(log2(fxd.pts) * 2)) {
+  
+  # l start from 1 because when k = 3, l = 1
+  for (l in 1:floor(max.KL / k)) {
+    # for (l in 51:52) {
+    tmp.se <- calc_se_niv(K               = k, 
+                          L               = l, 
+                          psbl.seq        = psbl.seq, 
+                          sigma.resid.err = sigma.resid.err,
+                          rho             = rho,
+                          corr.str        = CorrStr)
+    data.fig.niv <- rbind(data.fig.niv,
+                          cbind(k, l, tmp.se))
+    
+  }
+  
+}
+
+# shrunken, fixed intercept
+data.fig.shrk.fxdintcpt <- NULL
+for (i in 1:nrow(satisfy.shrk.fxdintcpt)) {
+  
+  k <- satisfy.shrk.fxdintcpt$K[i]
+  for (l in satisfy.shrk.fxdintcpt$L[i]:floor(max.KL / k)) {
+    # for (l in 53:53) {
+    # STRANGE THAT IF var.rand.eff = F, SE INCREASE WITH MORE MEASUREMENTS
+    tmp.se <- calc_se_shrk(K               = k, 
+                           L               = l, 
+                           J               = satisfy.shrk.fxdintcpt$J[i], 
+                           psbl.seq        = psbl.seq, 
+                           intcpt          = satisfy.shrk.fxdintcpt$intcpt[i], 
+                           sigma.resid.err = sigma.resid.err, 
+                           rho             = rho, 
+                           corr.str        = CorrStr, 
+                           sigma.mu        = sigma.mu, 
+                           sigma.tau       = sigma.tau, 
+                           sigma.mutau     = sigma.mutau,
+                           var.rand.eff    = T)
+    
+    # K               = k
+    # L               = l
+    # J               = satisfy.shrk.fxdintcpt$J[i]
+    # psbl.seq        = psbl.seq
+    # intcpt          = satisfy.shrk.fxdintcpt$intcpt[i]
+    # sigma.resid.err = sigma.resid.err
+    # rho             = rho
+    # corr.str        = CorrStr
+    # sigma.mu        = sigma.mu
+    # sigma.tau       = sigma.tau
+    # sigma.mutau     = sigma.mutau
+    # var.rand.eff    = T
+      
+    data.fig.shrk.fxdintcpt <- rbind(data.fig.shrk.fxdintcpt,
+                                     cbind(matrix(rep(c(k, l, satisfy.shrk.fxdintcpt[i, c("J", "I")], 
+                                                        as.character(satisfy.shrk.fxdintcpt[i, c("intcpt", "slp")])),
+                                                      nrow(tmp.se)),
+                                                  byrow = T,
+                                                  nrow  = nrow(tmp.se)), 
+                                           tmp.se))
+  }
+  
+  print(k)
+  
+}
+
+# shrunken, random intercept
+data.fig.shrk.rdmintcpt <- NULL
+for (i in 1:nrow(satisfy.shrk.rdmintcpt)) {
+  
+  k <- satisfy.shrk.rdmintcpt$K[i]
+  for (l in satisfy.shrk.rdmintcpt$L[i]:floor(max.KL / k)) {
+    # for (l in 53:53) {
+    tmp.se <- calc_se_shrk(K               = k, 
+                           L               = l, 
+                           J               = satisfy.shrk.rdmintcpt$J[i], 
+                           psbl.seq        = psbl.seq, 
+                           intcpt          = satisfy.shrk.rdmintcpt$intcpt[i], 
+                           sigma.resid.err = sigma.resid.err, 
+                           rho             = rho, 
+                           corr.str        = CorrStr, 
+                           sigma.mu        = sigma.mu, 
+                           sigma.tau       = sigma.tau, 
+                           sigma.mutau     = sigma.mutau,
+                           var.rand.eff    = T)
+    
+    data.fig.shrk.rdmintcpt <- rbind(data.fig.shrk.rdmintcpt,
+                                     cbind(matrix(rep(c(k, l, satisfy.shrk.rdmintcpt[i, c("J", "I")], 
+                                                        as.character(satisfy.shrk.rdmintcpt[i, c("intcpt", "slp")])),
+                                                      nrow(tmp.se)),
+                                                  byrow = T,
+                                                  nrow  = nrow(tmp.se)), 
+                                           tmp.se))
+  }
+  print(k)
+  
+}
+
+data.fig.niv <- data.frame(data.fig.niv)
+colnames(data.fig.niv) <- c("K", "L", "seq", "se")
+# data.fig.niv <- data.fig.niv %>%
+#   mutate(K  = as.integer(levels(K))[K],
+#          L  = as.integer(levels(L))[L],
+#          se = as.numeric(levels(se))[se])
+data.fig.niv <- data.fig.niv %>%
+  mutate(K  = as.integer(K),
+         L  = as.integer(L),
+         se = as.numeric(se))
+data.fig.niv <- data.fig.niv %>%
+  mutate(J = NA,
+         I = NA,
+         Estimator = "Naive Estimates",
+         IJ = 32)
+data.fig.niv <- data.fig.niv %>%
+  select(K, L, J, I, IJ, Estimator, seq, se)
+
+data.fig.shrk.fxdintcpt <- data.frame(data.fig.shrk.fxdintcpt)
+colnames(data.fig.shrk.fxdintcpt) <- c("K", "L", "J", "I", "intcpt", "slp", "j", "seq", "se")
+data.fig.shrk.fxdintcpt <- data.fig.shrk.fxdintcpt %>%
+  mutate(K = as.numeric(K),
+         L = as.numeric(L),
+         J = as.numeric(J),
+         I = as.numeric(I),
+         intcpt = as.character(intcpt), 
+         slp    = as.character(slp),
+         j      = as.numeric(j),
+         seq    = as.character(seq),
+         se     = as.numeric(se))
+# expect all 1s
+unique(data.fig.shrk.fxdintcpt$j)
+data.fig.shrk.fxdintcpt <- data.fig.shrk.fxdintcpt %>%
+  mutate(Estimator = "Shrunken Estimates-Fixed Intercepts",
+         IJ        = I * J)
+data.fig.shrk.fxdintcpt <- data.fig.shrk.fxdintcpt %>%
+  select(K, L, J, I, IJ, Estimator, seq, se)
+
+data.fig.shrk.rdmintcpt <- data.frame(data.fig.shrk.rdmintcpt)
+colnames(data.fig.shrk.rdmintcpt) <- c("K", "L", "J", "I", "intcpt", "slp", "j", "seq", "se")
+data.fig.shrk.rdmintcpt <- data.fig.shrk.rdmintcpt %>%
+  mutate(K = as.numeric(K),
+         L = as.numeric(L),
+         J = as.numeric(J),
+         I = as.numeric(I),
+         intcpt = as.character(intcpt), 
+         slp    = as.character(slp),
+         j      = as.numeric(j),
+         seq    = as.character(seq),
+         se     = as.numeric(se))
+# expect all 1s
+unique(data.fig.shrk.rdmintcpt$j)
+data.fig.shrk.rdmintcpt <- data.fig.shrk.rdmintcpt %>%
+  mutate(Estimator = "Shrunken Estimates-Random Intercepts",
+         IJ        = I * J)
+data.fig.shrk.rdmintcpt <- data.fig.shrk.rdmintcpt %>%
+  select(K, L, J, I, IJ, Estimator, seq, se)
+
+# merge all the estimates
+data.fig <- rbind(data.fig.niv, data.fig.shrk.fxdintcpt, data.fig.shrk.rdmintcpt)
+data.fig <- data.fig %>%
+  mutate(Estimator = factor(Estimator, c("Naive Estimates", 
+                                         "Shrunken Estimates-Fixed Intercepts",
+                                         "Shrunken Estimates-Random Intercepts")))
+data.fig <- data.fig %>%
+  mutate(KL = K * L)
+summ.data.fig <- data.fig %>%
+  group_by(Estimator, KL) %>%
+  summarise(avg_se = mean(se), 
+            max_se = max(se), 
+            min_se = min(se),
+            n      = n())
+
+summ.data.fig <- summ.data.fig %>%
+  mutate(slp = ifelse(grepl("Naive", Estimator), "Naive Estimates", "Shrunken Estimates"))
+# pick 24 as the KL of interest
+kl.interest <- 24
+
+data.fig.k <- data.fig %>%
+  filter(KL == kl.interest)
+summ.data.fig.k <- data.fig.k %>%
+  group_by(Estimator, K) %>%
+  summarise(avg_se = mean(se), 
+            max_se = max(se), 
+            min_se = min(se),
+            n      = n())
+summ.data.fig.k <- summ.data.fig.k %>%
+  mutate(slp = ifelse(grepl("Naive", Estimator), "Naive Estimates", "Shrunken Estimates"))
+
+p.app.pts <- ggplot(summ.data.fig %>%
+         filter(KL <= 100), aes(x = KL, y = avg_se, group = Estimator)) +
+  geom_point(aes(color = Estimator, shape = Estimator)) +
+  geom_line(aes(color = Estimator, linetype = Estimator)) +
+  geom_ribbon(aes(ymin = min_se, ymax = max_se, fill = Estimator), alpha = 0.3) +
+  geom_vline(xintercept = kl.interest, color = "gray") +
+  annotate("text", x = kl.interest + 25, y = 0.4, label = "See details on the right", color = "gray") +
+  theme_bw() + 
+  scale_linetype_manual(values = c("dashed", "dotted", "longdash")) +
+  scale_color_manual(values = cbPalette[c(1, 3, 5)]) +
+  scale_fill_manual(values = cbPalette[c(1, 3, 5)]) +
+  xlab("Number of measurements per participant") +
+  ylab("Standard error of individual-specific treatment effect") +
+  ylim(0.4, 2.1) +
+  scale_x_continuous(breaks = c(0, 24, 50, 75, 100)) +
+  ggtitle("Given number of participants across trials") +
+  theme(legend.position = "bottom", 
+        plot.title      = element_text(size = 11),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+p.app.k <- ggplot(summ.data.fig.k, aes(x = K, y = avg_se, group = Estimator)) +
+  geom_point(aes(color = Estimator, shape = Estimator)) +
+  geom_line(aes(color = Estimator, linetype = Estimator)) +
+  geom_ribbon(aes(ymin = min_se, ymax = max_se, fill = Estimator), alpha = 0.3) +
+  # facet_grid(~ intcpt) +
+  theme_bw() + 
+  scale_linetype_manual(values = c("dashed", "dotted", "longdash")) +
+  scale_color_manual(values = cbPalette[c(1, 3, 5)]) +
+  scale_fill_manual(values = cbPalette[c(1, 3, 5)]) +
+  xlab("Number of treatment periods per sequence") +
+  ylab("Standard error of individual-specific treatment effect") +
+  ylim(0.4, 2.1) +
+  ggtitle("Given number of measurements per participant") +
+  theme(legend.position = "bottom", 
+        plot.title      = element_text(size = 11),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+legend.shared.app <- get_legend(p.app.pts)
+p.app.pts <- p.app.pts + theme(legend.position="none")
+p.app.k   <- p.app.k + theme(legend.position="none")
+
+# Figure 3
+grid.arrange(p.app.pts, p.app.k, legend.shared.app, ncol = 2, nrow = 2,
+             layout_matrix = rbind(c(1, 2), rep(3, 2)),
+             widths = c(1/2, 1/2), heights = c(9/10, 1/10))
+dev.off()
