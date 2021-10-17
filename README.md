@@ -1,6 +1,6 @@
 # Sample size calculations for n-of-1 trials
 
-Code for paper Yang, J., Steingrimsson, J. A., Dahabreh, I. J., & Schmid, C. H. Sample size calculations for n-of-1 trials.
+Code for paper Yang, J., Steingrimsson, J. A., & Schmid, C. H. Sample size calculations for n-of-1 trials.
 
 * `main/`: code for illustrations in the main manuscript and appendices.
   * Simulations:
