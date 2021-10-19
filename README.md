@@ -15,5 +15,5 @@ Code for paper [Yang, J., Steingrimsson, J. A., & Schmid, C. H. Sample size calc
 
 * `Results/`: code to generate figures and tables in the paper.
 
-* `Shiny/`: code for the Shiny app.
+* `Shiny/`: code for the [Shiny app](https://jiabeiyang.shinyapps.io/SampleSizeNof1/).
   * `TestDesgin.csv`: example input file if one wants to specify sequences of interest.
